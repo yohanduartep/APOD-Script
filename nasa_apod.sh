@@ -1,54 +1,79 @@
 #!/bin/bash
-API_KEY="API"
+API_KEY="API_HERE"
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
-IMAGE_PATH="Pictures/apod.jpg"
-IMAGE_OLDPATH="Pictures/apod_old.jpg"
-IMAGE_TEMPPATH="Pictures/apod_temp.jpg"
+DAILY_PATH="/Pictures/apod.jpg"
+RANDOM_PATH="/Pictures/randomapod.jpg"
 
-#Only starts if there is conenection to the internet
+START_DATE="1995-06-16"
+END_DATE=$(date +%F)
+start_ts=$(date -d "$START_DATE" +%s)
+end_ts=$(date -d "$END_DATE" +%s)
+
+is_daily_set="false"
+is_random_set="false"
+
 if ! ping -c 1 google.com &> /dev/null; then
     echo "No internet connection. Exiting."
     exit 1
 fi
 
-#Only runs if image is older than 24 hours
-if [ -f "$IMAGE_PATH" ]; then
-    if [ "$(find "$IMAGE_PATH" -mmin -1440)" ]; then
-        echo "Image is less than 24 hours old. Exiting."
-        exit 0
+function checkSizes(){
+    IMAGE_SIZE=$(identify -format "%wx%h" "$1")
+    IMAGE_WIDTH=$(echo "$IMAGE_SIZE" | cut -d 'x' -f 1)
+    IMAGE_HEIGHT=$(echo "$IMAGE_SIZE" | cut -d 'x' -f 2)
+
+    if [ "$IMAGE_WIDTH" -lt 100 ] || [ "$IMAGE_HEIGHT" -lt 100 ]; then
+        echo "Downloaded image is too small. Exiting."
+        return 1
+    fi
+
+    if [ "$IMAGE_HEIGHT" -gt $((IMAGE_WIDTH * 125 / 100)) ]; then
+        echo "Downloaded image is too tall. Exiting."
+        return 1
+    fi
+
+    return 0
+}
+
+DAILY_JSON=$(curl -s "https://api.nasa.gov/planetary/apod?api_key=$API_KEY")
+DAILY_URL=$(echo "$DAILY_JSON" | jq -r '.hdurl // .url')
+if [[ "$DAILY_URL" == *youtube.com* || "$DAILY_URL" == *vimeo.com* ]]; then
+    echo "Daily is video. Setting random image."
+else
+    wget -q -O "$DAILY_PATH" "$DAILY_URL"
+    if checkSizes "$DAILY_PATH"; then
+        is_daily_set="true"
     fi
 fi
 
-# Fetch APOD data
-JSON_DATA=$(curl -s "https://api.nasa.gov/planetary/apod?api_key=$API_KEY")
-# Extract image URL
-MEDIA_URL=$(echo "$JSON_DATA" | jq -r '.hdurl // .url')
+while [ "$is_random_set" = "false" ]; do
+    while [ "$is_daily_set" = "false" ];  do
+        random_ts=$(shuf -i $start_ts-$end_ts -n 1)
+        random_date=$(date -d "@$random_ts" +%F)
+        RANDOM_JSON=$(curl -s "https://api.nasa.gov/planetary/apod?api_key=$API_KEY&date=$random_date")
+        RANDOM_URL=$(echo "$RANDOM_JSON" | jq -r '.hdurl // .url')
+        if [[ "$RANDOM_URL" == *youtube.com* || "$RANDOM_URL" == *vimeo.com* ]]; then
+            echo "Random is video. Trying again."       
+            continue
+        else
+            wget -q -O "$DAILY_PATH" "$RANDOM_URL"
+            if checkSizes "$DAILY_PATH"; then 
+                is_daily_set="true"
+            fi
+        fi
+    done
 
-# Check if URL is an image
-if [[ "$MEDIA_URL" == *youtube.com* || "$MEDIA_URL" == *vimeo.com* ]]; then
-    exit 0
-else
-    IMAGE_URL="$MEDIA_URL"
-    wget -q -O "$IMAGE_TEMPPATH" "$IMAGE_URL"
-fi
-
-# Check if the image downloaded has a valid size (image proportion should be at least 1:1 and height should not be more than 1.25x the width)
-
-IMAGE_SIZE=$(identify -format "%wx%h" "$IMAGE_TEMPPATH")
-IMAGE_WIDTH=$(echo "$IMAGE_SIZE" | cut -d 'x' -f 1)
-IMAGE_HEIGHT=$(echo "$IMAGE_SIZE" | cut -d 'x' -f 2)
-
-if [ "$IMAGE_WIDTH" -lt 100 ] || [ "$IMAGE_HEIGHT" -lt 100 ]; then
-    echo "Downloaded image is too small. Exiting."
-    exit 1
-fi
-
-if [ "$IMAGE_HEIGHT" -gt $((IMAGE_WIDTH * 125 / 100)) ]; then
-    echo "Downloaded image is too tall. Exiting."
-    exit 1
-fi
-
-# Move the temporary image to the final location
-mv "$IMAGE_PATH" "$IMAGE_OLDPATH"
-mv "$IMAGE_TEMPPATH" "$IMAGE_PATH"
+    random_ts=$(shuf -i $start_ts-$end_ts -n 1)
+    random_date=$(date -d "@$random_ts" +%F)
+    RANDOM_JSON=$(curl -s "https://api.nasa.gov/planetary/apod?api_key=$API_KEY&date=$random_date")
+    RANDOM_URL=$(echo "$RANDOM_JSON" | jq -r '.hdurl // .url')
+    if [[ "$RANDOM_URL" == *youtube.com* || "$RANDOM_URL" == *vimeo.com* ]]; then
+        echo "Random is video. Trying again."       
+    else
+        wget -q -O "$RANDOM_PATH" "$RANDOM_URL"
+        if checkSizes "$RANDOM_PATH"; then 
+            is_random_set="true"
+        fi
+    fi
+done
 
