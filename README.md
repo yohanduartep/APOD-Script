@@ -3,5 +3,5 @@ Script to get astronomic picture of the day! If the image is too tall or a video
 
 Images
 
-[alt text](://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/001.jpg)
-[alt text](://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/002.jpg)
+![alt text](://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/001.jpg)
+![alt text](://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/002.jpg)
