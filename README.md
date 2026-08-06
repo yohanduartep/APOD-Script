@@ -16,3 +16,11 @@ brew install imagemagick python
 
 `nasa_apod.sh` starts the Python script used by the daily LaunchAgent. The NASA API
 key and image paths are stored in `.env`.
+
+Keep a display's current wallpaper while updating and publishing the others:
+
+```bash
+./nasa_apod.sh --skip "T24i-30"
+```
+
+Use `--skip` more than once to keep multiple displays unchanged.

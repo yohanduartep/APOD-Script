@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import json
 import os
 import re
@@ -355,15 +356,18 @@ def daily_url(config: Config) -> str | None:
 
 
 def acquire_wallpapers(
-    config: Config, monitors: list[Monitor], identify: list[str]
+    config: Config, monitors: list[Monitor], identify: list[str], skipped: set[str]
 ) -> tuple[list[Monitor], list[Path], int]:
     config.output_dir.mkdir(parents=True, exist_ok=True)
     pool = CandidatePool(config)
     completed_monitors: list[Monitor] = []
     wallpapers: list[Path] = []
     failures = 0
-    today = daily_url(config)
+    today = daily_url(config) if monitors[0].name not in skipped else None
     for index, monitor in enumerate(monitors):
+        if monitor.name in skipped:
+            print(f"Skipped {monitor.name} ({monitor.size})")
+            continue
         try:
             if index == 0:
                 destination = config.daily_path
@@ -386,7 +390,7 @@ def acquire_wallpapers(
         except RuntimeError as error:
             failures += 1
             print(error, file=sys.stderr)
-    if not wallpapers:
+    if not wallpapers and failures:
         raise RuntimeError("No wallpapers were created")
     return completed_monitors, wallpapers, failures
 
@@ -523,12 +527,25 @@ def publish(wallpapers: list[Path]) -> None:
         git("push", "origin", "HEAD:main")
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--skip", action="append", default=[], metavar="DISPLAY")
+    return parser.parse_args()
+
+
 def main() -> int:
     try:
+        arguments = parse_args()
         config = load_config()
         monitors = detect_monitors()
+        monitor_names = {monitor.name for monitor in monitors}
+        unknown = set(arguments.skip) - monitor_names
+        if unknown:
+            raise RuntimeError(f"Unknown display: {', '.join(sorted(unknown))}")
         identify = identify_command()
-        completed_monitors, wallpapers, failures = acquire_wallpapers(config, monitors, identify)
+        completed_monitors, wallpapers, failures = acquire_wallpapers(
+            config, monitors, identify, set(arguments.skip)
+        )
         application_failures = apply_wallpapers(completed_monitors, wallpapers)
         failures += application_failures
         active = active_wallpapers(monitors)
