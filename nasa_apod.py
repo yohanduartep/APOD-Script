@@ -20,6 +20,21 @@ from pathlib import Path
 API_URL = "https://api.nasa.gov/planetary/apod"
 SCRIPT_DIR = Path(__file__).resolve().parent
 MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
+MAX_IMAGE_PIXELS = 100_000_000
+MAGICK_LIMITS = [
+    "-limit",
+    "memory",
+    "256MiB",
+    "-limit",
+    "map",
+    "512MiB",
+    "-limit",
+    "disk",
+    "1GiB",
+    "-limit",
+    "area",
+    "100MP",
+]
 DISPLAY_SLOTS = {
     "Built-in Retina Display": 1,
     "T24i-30": 2,
@@ -172,11 +187,25 @@ def download(url: str, destination: Path, config: Config) -> None:
                 if downloaded > MAX_DOWNLOAD_BYTES:
                     raise RuntimeError("Image exceeds 100 MB")
                 output.write(chunk)
+        validate_image_signature(temporary)
         temporary.replace(destination)
         clear_quarantine(destination)
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
+
+
+def validate_image_signature(path: Path) -> None:
+    with path.open("rb") as image:
+        header = image.read(16)
+    supported = (
+        header.startswith(b"\xff\xd8\xff")
+        or header.startswith(b"\x89PNG\r\n\x1a\n")
+        or header.startswith((b"GIF87a", b"GIF89a", b"BM", b"II*\x00", b"MM\x00*"))
+        or (header.startswith(b"RIFF") and header[8:12] == b"WEBP")
+    )
+    if not supported:
+        raise RuntimeError("Downloaded file is not a supported image")
 
 
 def clear_quarantine(path: Path) -> None:
@@ -191,17 +220,21 @@ def clear_quarantine(path: Path) -> None:
 def identify_command() -> list[str]:
     magick = shutil.which("magick")
     if magick:
-        return [magick, "identify"]
+        return [magick, "identify", *MAGICK_LIMITS]
     identify = shutil.which("identify")
     if identify:
-        return [identify]
+        return [identify, *MAGICK_LIMITS]
     raise RuntimeError("Missing dependency: ImageMagick")
 
 
 def image_dimensions(path: Path, identify: list[str]) -> tuple[int, int]:
+    validate_image_signature(path)
     result = run([*identify, "-format", "%w %h", f"{path}[0]"])
     width, height = result.stdout.split()[:2]
-    return int(width), int(height)
+    dimensions = int(width), int(height)
+    if dimensions[0] <= 0 or dimensions[1] <= 0 or dimensions[0] * dimensions[1] > MAX_IMAGE_PIXELS:
+        raise RuntimeError("Image dimensions exceed the safety limit")
+    return dimensions
 
 
 def image_matches(path: Path, monitor: Monitor, config: Config, identify: list[str]) -> bool:
@@ -337,7 +370,17 @@ def crop_to_monitor(path: Path, monitor: Monitor, identify: list[str]) -> None:
     magick = command_path("magick")
     try:
         subprocess.run(
-            [magick, str(path), "-gravity", "center", "-crop", f"{crop_width}x{crop_height}+0+0", "+repage", str(temporary)],
+            [
+                magick,
+                *MAGICK_LIMITS,
+                str(path),
+                "-gravity",
+                "center",
+                "-crop",
+                f"{crop_width}x{crop_height}+0+0",
+                "+repage",
+                str(temporary),
+            ],
             check=True,
             capture_output=True,
             timeout=60,
@@ -509,8 +552,20 @@ def publish(wallpapers: dict[str, Path]) -> None:
         slot = DISPLAY_SLOTS.get(display)
         if slot is None:
             raise RuntimeError(f"No Git image slot configured for {display}")
+        image_dimensions(wallpaper, identify_command())
         destination = SCRIPT_DIR / f"{slot:03}.jpg"
-        shutil.copy2(wallpaper, destination)
+        temporary = destination.with_name(f".{destination.name}.{time.time_ns()}.tmp.jpg")
+        try:
+            subprocess.run(
+                [command_path("magick"), *MAGICK_LIMITS, str(wallpaper), "-strip", str(temporary)],
+                check=True,
+                capture_output=True,
+                timeout=60,
+            )
+            temporary.replace(destination)
+        except (OSError, subprocess.SubprocessError):
+            temporary.unlink(missing_ok=True)
+            raise
         destination.chmod(0o644)
         published.append(destination)
     tracked = git("ls-files", capture=True).splitlines()
@@ -520,8 +575,8 @@ def publish(wallpapers: dict[str, Path]) -> None:
     content = readme.read_text()
     version = time.time_ns()
     images = "\n".join(
-        f"![{display}](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/{slot:03}.jpg?v={version})"
-        for display, slot in sorted(DISPLAY_SLOTS.items(), key=lambda item: item[1])
+        f"![Wallpaper {slot}](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/{slot:03}.jpg?v={version})"
+        for _, slot in sorted(DISPLAY_SLOTS.items(), key=lambda item: item[1])
         if f"{slot:03}.jpg" in numbered
     )
     section = f"## Current wallpapers\n\n{images}\n"
