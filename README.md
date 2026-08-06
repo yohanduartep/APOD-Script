@@ -6,7 +6,7 @@ are detected at runtime, so the script also works when I use only the MacBook sc
 
 The built-in display's wallpaper is published here:
 
-![Current wallpaper](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/001.jpg?v=0)
+![Current wallpaper](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/001.jpg?v=1786039764639919000)
 
 ## Requirements
 
