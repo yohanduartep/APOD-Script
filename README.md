@@ -11,7 +11,8 @@ The built-in display's wallpaper is published here:
 ## Requirements
 
 ```bash
-brew install imagemagick jq
+brew install imagemagick python
 ```
 
-The NASA API key and image paths are stored in `.env`.
+`nasa_apod.sh` starts the Python script used by the daily LaunchAgent. The NASA API
+key and image paths are stored in `.env`.
