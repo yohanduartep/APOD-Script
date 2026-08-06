@@ -442,10 +442,6 @@ if (appliedPath !== path) throw new Error('Wallpaper update was not retained for
             stderr=subprocess.DEVNULL,
             check=False,
         )
-    cutoff = time.time() - 7 * 24 * 60 * 60
-    for path in cache.glob("*.jpg"):
-        if path.stat().st_mtime < cutoff:
-            path.unlink()
     return failures
 
 
@@ -459,26 +455,71 @@ def git(*arguments: str, capture: bool = False) -> str:
     return result.stdout.strip() if capture else ""
 
 
-def publish(wallpaper: Path) -> None:
+def active_wallpapers(monitors: list[Monitor]) -> list[Path]:
+    script = """ObjC.import('AppKit');
+var workspace = $.NSWorkspace.sharedWorkspace;
+$.NSScreen.screens.js.map(function(screen) {
+    var url = workspace.desktopImageURLForScreen(screen);
+    return screen.localizedName.js + '\\t' + (url ? url.path.js : '');
+}).join('\\n');"""
+    result = run([command_path("osascript"), "-l", "JavaScript", "-e", script], timeout=15)
+    paths: dict[str, Path] = {}
+    for line in result.stdout.splitlines():
+        name, separator, value = line.partition("\t")
+        if separator and value:
+            paths[name] = Path(value)
+    wallpapers: list[Path] = []
+    for monitor in monitors:
+        path = paths.get(monitor.name)
+        if path is None or not path.is_file():
+            raise RuntimeError(f"Active wallpaper not found for {monitor.name}")
+        wallpapers.append(path)
+    return wallpapers
+
+
+def clean_cache(active: list[Path]) -> None:
+    cache = Path.home() / "Library/Caches/APOD-Script"
+    preserved = {path.resolve() for path in active}
+    cutoff = time.time() - 7 * 24 * 60 * 60
+    for path in cache.glob("*.jpg"):
+        if path.resolve() not in preserved and path.stat().st_mtime < cutoff:
+            path.unlink()
+
+
+def publish(wallpapers: list[Path]) -> None:
     working_tree = git("status", "--porcelain", "--untracked-files=all", capture=True).splitlines()
-    if any(not line.endswith(" 001.jpg") for line in working_tree):
+    if working_tree:
         print("Wallpaper not published: repository has uncommitted changes", file=sys.stderr)
         return
     git("fetch", "origin", "main")
     unpublished = git("diff", "--name-only", "origin/main..HEAD", capture=True).splitlines()
-    allowed = {"001.jpg", "README.md"}
-    if any(path not in allowed for path in unpublished):
+    if any(path != "README.md" and not re.fullmatch(r"\d{3}\.jpg", path) for path in unpublished):
         raise RuntimeError("Local branch has unpushed commits")
-    shutil.copy2(wallpaper, SCRIPT_DIR / "001.jpg")
+    published: list[Path] = []
+    for index, wallpaper in enumerate(wallpapers, start=1):
+        destination = SCRIPT_DIR / f"{index:03}.jpg"
+        shutil.copy2(wallpaper, destination)
+        destination.chmod(0o644)
+        published.append(destination)
+    tracked = git("ls-files", capture=True).splitlines()
+    stale = [SCRIPT_DIR / path for path in tracked if re.fullmatch(r"\d{3}\.jpg", path) and SCRIPT_DIR / path not in published]
+    for path in stale:
+        path.unlink(missing_ok=True)
     readme = SCRIPT_DIR / "README.md"
     content = readme.read_text()
-    versioned = re.sub(r"001\.jpg\?v=\d+", f"001.jpg?v={time.time_ns()}", content)
-    readme.write_text(versioned)
-    changed = subprocess.run(
-        [command_path("git"), "-C", str(SCRIPT_DIR), "diff", "--quiet", "HEAD", "--", "001.jpg", "README.md"]
-    ).returncode
+    version = time.time_ns()
+    images = "\n".join(
+        f"![Wallpaper {index}](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/{path.name}?v={version})"
+        for index, path in enumerate(published, start=1)
+    )
+    section = f"## Current wallpapers\n\n{images}\n"
+    updated = re.sub(r"## Current wallpapers\n.*?(?=\n## )", section.rstrip(), content, flags=re.DOTALL)
+    readme.write_text(updated)
+    managed = ["README.md", *[path.name for path in published], *[path.name for path in stale]]
+    git("add", "--all", "--", *managed)
+    changed = subprocess.run([command_path("git"), "-C", str(SCRIPT_DIR), "diff", "--cached", "--quiet"]).returncode
     if changed:
-        git("commit", "--only", "-m", f"Update wallpaper {date.today().isoformat()}", "--", "001.jpg", "README.md")
+        git("commit", "-m", f"Update wallpapers {date.today().isoformat()}", "--", *managed)
         git("push", "origin", "HEAD:main")
 
 
@@ -490,12 +531,9 @@ def main() -> int:
         completed_monitors, wallpapers, failures = acquire_wallpapers(config, monitors, identify)
         application_failures = apply_wallpapers(completed_monitors, wallpapers)
         failures += application_failures
-        builtin_index = next(
-            (index for index, monitor in enumerate(completed_monitors) if is_builtin(monitor.name)),
-            None,
-        )
-        if builtin_index is not None:
-            publish(wallpapers[builtin_index])
+        active = active_wallpapers(monitors)
+        publish(active)
+        clean_cache(active)
         print(f"Done: created {len(wallpapers)} monitor-matched wallpaper(s), {failures} failed")
         return 1 if failures else 0
     except (RuntimeError, OSError, subprocess.SubprocessError, urllib.error.URLError) as error:
