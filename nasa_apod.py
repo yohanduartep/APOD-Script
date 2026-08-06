@@ -396,6 +396,7 @@ def apply_wallpapers(monitors: list[Monitor], wallpapers: list[Path]) -> int:
     cache.mkdir(parents=True, exist_ok=True)
     run_id = time.time_ns()
     failures = 0
+    applied_count = 0
     for index, (monitor, wallpaper) in enumerate(zip(monitors, wallpapers, strict=True), start=1):
         cached = cache / f"{run_id}-{index}{wallpaper.suffix or '.jpg'}"
         shutil.copy2(wallpaper, cached)
@@ -426,6 +427,7 @@ if (appliedPath !== path) throw new Error('Wallpaper update was not retained for
             )
             if result.returncode == 0:
                 applied = True
+                applied_count += 1
                 break
             last_error = result.stderr.strip() or f"exit status {result.returncode}"
             if attempt < 2:
@@ -433,6 +435,13 @@ if (appliedPath !== path) throw new Error('Wallpaper update was not retained for
         if not applied:
             failures += 1
             print(f"Failed to apply wallpaper for {monitor.name}: {last_error}", file=sys.stderr)
+    if applied_count:
+        subprocess.run(
+            [command_path("killall"), "WallpaperAgent"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
     cutoff = time.time() - 7 * 24 * 60 * 60
     for path in cache.glob("*.jpg"):
         if path.stat().st_mtime < cutoff:
