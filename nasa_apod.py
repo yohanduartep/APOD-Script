@@ -20,6 +20,11 @@ from pathlib import Path
 API_URL = "https://api.nasa.gov/planetary/apod"
 SCRIPT_DIR = Path(__file__).resolve().parent
 MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
+DISPLAY_SLOTS = {
+    "Built-in Retina Display": 1,
+    "T24i-30": 2,
+    "ASUS VP249": 3,
+}
 
 
 @dataclass(frozen=True)
@@ -459,7 +464,7 @@ def git(*arguments: str, capture: bool = False) -> str:
     return result.stdout.strip() if capture else ""
 
 
-def active_wallpapers(monitors: list[Monitor]) -> list[Path]:
+def active_wallpapers(monitors: list[Monitor]) -> dict[str, Path]:
     script = """ObjC.import('AppKit');
 var workspace = $.NSWorkspace.sharedWorkspace;
 $.NSScreen.screens.js.map(function(screen) {
@@ -472,25 +477,25 @@ $.NSScreen.screens.js.map(function(screen) {
         name, separator, value = line.partition("\t")
         if separator and value:
             paths[name] = Path(value)
-    wallpapers: list[Path] = []
+    wallpapers: dict[str, Path] = {}
     for monitor in monitors:
         path = paths.get(monitor.name)
         if path is None or not path.is_file():
             raise RuntimeError(f"Active wallpaper not found for {monitor.name}")
-        wallpapers.append(path)
+        wallpapers[monitor.name] = path
     return wallpapers
 
 
-def clean_cache(active: list[Path]) -> None:
+def clean_cache(active: dict[str, Path]) -> None:
     cache = Path.home() / "Library/Caches/APOD-Script"
-    preserved = {path.resolve() for path in active}
+    preserved = {path.resolve() for path in active.values()}
     cutoff = time.time() - 7 * 24 * 60 * 60
     for path in cache.glob("*.jpg"):
         if path.resolve() not in preserved and path.stat().st_mtime < cutoff:
             path.unlink()
 
 
-def publish(wallpapers: list[Path]) -> None:
+def publish(wallpapers: dict[str, Path]) -> None:
     working_tree = git("status", "--porcelain", "--untracked-files=all", capture=True).splitlines()
     if working_tree:
         print("Wallpaper not published: repository has uncommitted changes", file=sys.stderr)
@@ -500,26 +505,29 @@ def publish(wallpapers: list[Path]) -> None:
     if any(path != "README.md" and not re.fullmatch(r"\d{3}\.jpg", path) for path in unpublished):
         raise RuntimeError("Local branch has unpushed commits")
     published: list[Path] = []
-    for index, wallpaper in enumerate(wallpapers, start=1):
-        destination = SCRIPT_DIR / f"{index:03}.jpg"
+    for display, wallpaper in wallpapers.items():
+        slot = DISPLAY_SLOTS.get(display)
+        if slot is None:
+            raise RuntimeError(f"No Git image slot configured for {display}")
+        destination = SCRIPT_DIR / f"{slot:03}.jpg"
         shutil.copy2(wallpaper, destination)
         destination.chmod(0o644)
         published.append(destination)
     tracked = git("ls-files", capture=True).splitlines()
-    stale = [SCRIPT_DIR / path for path in tracked if re.fullmatch(r"\d{3}\.jpg", path) and SCRIPT_DIR / path not in published]
-    for path in stale:
-        path.unlink(missing_ok=True)
+    numbered = {path for path in tracked if re.fullmatch(r"\d{3}\.jpg", path)}
+    numbered.update(path.name for path in published)
     readme = SCRIPT_DIR / "README.md"
     content = readme.read_text()
     version = time.time_ns()
     images = "\n".join(
-        f"![Wallpaper {index}](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/{path.name}?v={version})"
-        for index, path in enumerate(published, start=1)
+        f"![{display}](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/{slot:03}.jpg?v={version})"
+        for display, slot in sorted(DISPLAY_SLOTS.items(), key=lambda item: item[1])
+        if f"{slot:03}.jpg" in numbered
     )
     section = f"## Current wallpapers\n\n{images}\n"
     updated = re.sub(r"## Current wallpapers\n.*?(?=\n## )", section.rstrip(), content, flags=re.DOTALL)
     readme.write_text(updated)
-    managed = ["README.md", *[path.name for path in published], *[path.name for path in stale]]
+    managed = ["README.md", *[path.name for path in published]]
     git("add", "--all", "--", *managed)
     changed = subprocess.run([command_path("git"), "-C", str(SCRIPT_DIR), "diff", "--cached", "--quiet"]).returncode
     if changed:
@@ -540,8 +548,8 @@ def main() -> int:
         monitors = detect_monitors()
         monitor_names = {monitor.name for monitor in monitors}
         unknown = set(arguments.skip) - monitor_names
-        if unknown:
-            raise RuntimeError(f"Unknown display: {', '.join(sorted(unknown))}")
+        for display in sorted(unknown):
+            print(f"Skip ignored; display not connected: {display}")
         identify = identify_command()
         completed_monitors, wallpapers, failures = acquire_wallpapers(
             config, monitors, identify, set(arguments.skip)
