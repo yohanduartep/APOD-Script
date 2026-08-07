@@ -6,10 +6,9 @@ displays are detected at runtime, so the script also works with only the MacBook
 
 ## Current wallpapers
 
-![Wallpaper 1](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/001.jpg?v=1786040296329235000)
-![Wallpaper 2](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/002.jpg?v=1786040296329235000)
-![Wallpaper 3](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/003.jpg?v=1786040296329235000)
-
+![Wallpaper 1](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/001.jpg?v=1786105411228709000)
+![Wallpaper 2](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/002.jpg?v=1786105411228709000)
+![Wallpaper 3](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/003.jpg?v=1786105411228709000)
 ## Requirements
 
 ```bash
