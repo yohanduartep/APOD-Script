@@ -9,6 +9,7 @@ displays are detected at runtime, so the script also works with only the MacBook
 ![Wallpaper 1](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/001.jpg?v=1786105411228709000)
 ![Wallpaper 2](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/002.jpg?v=1786105411228709000)
 ![Wallpaper 3](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/003.jpg?v=1786105411228709000)
+
 ## Requirements
 
 ```bash
@@ -25,3 +26,15 @@ Keep a display's current wallpaper while updating and publishing the others:
 ```
 
 Use `--skip` more than once to keep multiple displays unchanged.
+
+Replace today's APOD with monitor-matched random images:
+
+```bash
+./nasa_apod.sh --random
+```
+
+`--random` can be combined with `--skip`:
+
+```bash
+./nasa_apod.sh --random --skip "T24i-30"
+```

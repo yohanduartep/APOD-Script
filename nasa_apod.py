@@ -404,14 +404,18 @@ def daily_url(config: Config) -> str | None:
 
 
 def acquire_wallpapers(
-    config: Config, monitors: list[Monitor], identify: list[str], skipped: set[str]
+    config: Config,
+    monitors: list[Monitor],
+    identify: list[str],
+    skipped: set[str],
+    random_only: bool,
 ) -> tuple[list[Monitor], list[Path], int]:
     config.output_dir.mkdir(parents=True, exist_ok=True)
     pool = CandidatePool(config)
     completed_monitors: list[Monitor] = []
     wallpapers: list[Path] = []
     failures = 0
-    today = daily_url(config) if monitors[0].name not in skipped else None
+    today = None if random_only or monitors[0].name in skipped else daily_url(config)
     for index, monitor in enumerate(monitors):
         if monitor.name in skipped:
             print(f"Skipped {monitor.name} ({monitor.size})")
@@ -579,8 +583,8 @@ def publish(wallpapers: dict[str, Path]) -> None:
         for _, slot in sorted(DISPLAY_SLOTS.items(), key=lambda item: item[1])
         if f"{slot:03}.jpg" in numbered
     )
-    section = f"## Current wallpapers\n\n{images}\n"
-    updated = re.sub(r"## Current wallpapers\n.*?(?=\n## )", section.rstrip(), content, flags=re.DOTALL)
+    section = f"## Current wallpapers\n\n{images}\n\n"
+    updated = re.sub(r"## Current wallpapers\n.*?(?=## )", section, content, flags=re.DOTALL)
     readme.write_text(updated)
     managed = ["README.md", *[path.name for path in published]]
     git("add", "--all", "--", *managed)
@@ -593,6 +597,7 @@ def publish(wallpapers: dict[str, Path]) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip", action="append", default=[], metavar="DISPLAY")
+    parser.add_argument("--random", action="store_true", help="skip today's APOD and use random images")
     return parser.parse_args()
 
 
@@ -607,7 +612,7 @@ def main() -> int:
             print(f"Skip ignored; display not connected: {display}")
         identify = identify_command()
         completed_monitors, wallpapers, failures = acquire_wallpapers(
-            config, monitors, identify, set(arguments.skip)
+            config, monitors, identify, set(arguments.skip), arguments.random
         )
         application_failures = apply_wallpapers(completed_monitors, wallpapers)
         failures += application_failures
