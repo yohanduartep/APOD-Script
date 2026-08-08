@@ -584,6 +584,8 @@ def main() -> int:
         application_failures = apply_wallpapers(completed_monitors, wallpapers)
         failures += application_failures
         active = active_wallpapers(monitors)
+        for monitor, wallpaper in zip(completed_monitors, wallpapers, strict=True):
+            active[monitor.name] = wallpaper
         publish(active)
         clean_cache(active)
         print(f"Done: created {len(wallpapers)} monitor-matched wallpaper(s), {failures} failed")
