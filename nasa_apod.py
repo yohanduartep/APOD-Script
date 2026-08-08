@@ -528,7 +528,7 @@ def publish(wallpapers: dict[str, Path]) -> None:
         temporary = destination.with_name(f".{destination.name}.{time.time_ns()}.tmp.jpg")
         try:
             subprocess.run(
-                [command_path("magick"), *MAGICK_LIMITS, str(wallpaper), "-strip", str(temporary)],
+                [command_path("magick"), *MAGICK_LIMITS, f"{wallpaper}[0]", "-strip", str(temporary)],
                 check=True,
                 capture_output=True,
                 timeout=60,
