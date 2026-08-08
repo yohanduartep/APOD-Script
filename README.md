@@ -1,8 +1,9 @@
 # APOD-Script
 
 Updates my macOS wallpapers every day using NASA's Astronomy Picture of the Day.
-Images are matched or center-cropped to each display's aspect ratio. Connected
-displays are detected at runtime, so the script also works with only the MacBook screen.
+Images are matched to each display's aspect ratio when possible, then stretched to fill
+the screen without cropping. Connected displays are detected at runtime, so the script
+also works with only the MacBook screen.
 
 ## Current wallpapers
 

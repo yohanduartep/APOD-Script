@@ -349,47 +349,12 @@ def random_wallpaper(
     if best_candidate is not None:
         try:
             download(best_candidate.image_url, destination, config)
-            crop_to_monitor(destination, monitor, identify)
-            if image_matches(destination, monitor, config, identify):
+            width, height = image_dimensions(destination, identify)
+            if width >= config.min_width and height >= config.min_height:
                 return attempts
         except (OSError, RuntimeError, subprocess.SubprocessError, urllib.error.URLError, TimeoutError):
             destination.unlink(missing_ok=True)
     raise RuntimeError(f"Failed to find a suitable image for {monitor.name} ({monitor.size}) after {attempts} image attempts")
-
-
-def crop_to_monitor(path: Path, monitor: Monitor, identify: list[str]) -> None:
-    width, height = image_dimensions(path, identify)
-    target_ratio = monitor.width / monitor.height
-    if width / height > target_ratio:
-        crop_width = round(height * target_ratio)
-        crop_height = height
-    else:
-        crop_width = width
-        crop_height = round(width / target_ratio)
-    temporary = path.with_name(f".{path.name}.{time.time_ns()}.crop.jpg")
-    magick = command_path("magick")
-    try:
-        subprocess.run(
-            [
-                magick,
-                *MAGICK_LIMITS,
-                str(path),
-                "-gravity",
-                "center",
-                "-crop",
-                f"{crop_width}x{crop_height}+0+0",
-                "+repage",
-                str(temporary),
-            ],
-            check=True,
-            capture_output=True,
-            timeout=60,
-        )
-        temporary.replace(path)
-        clear_quarantine(path)
-    except Exception:
-        temporary.unlink(missing_ok=True)
-        raise
 
 
 def daily_url(config: Config) -> str | None:
@@ -467,7 +432,9 @@ if (screens.length !== 1) throw new Error('Display not found: ' + name);
 var screen = screens[0];
 var workspace = $.NSWorkspace.sharedWorkspace;
 var url = $.NSURL.fileURLWithPath(path);
-var options = workspace.desktopImageOptionsForScreen(screen);
+var options = $.NSMutableDictionary.dictionaryWithDictionary(workspace.desktopImageOptionsForScreen(screen));
+options.setObjectForKey($.NSNumber.numberWithInteger($.NSImageScaleAxesIndependently), $.NSWorkspaceDesktopImageScalingKey);
+options.setObjectForKey($.NSNumber.numberWithBool(false), $.NSWorkspaceDesktopImageAllowClippingKey);
 var error = Ref();
 var success = workspace.setDesktopImageURLForScreenOptionsError(url, screen, options, error);
 if (!success) throw new Error(error[0] ? error[0].localizedDescription.js : 'Wallpaper update failed');
