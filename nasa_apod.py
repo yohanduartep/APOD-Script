@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -53,6 +54,7 @@ class Config:
     min_width: int
     min_height: int
     user_agent: str
+    dataset_categories: Path
 
 
 @dataclass(frozen=True)
@@ -112,6 +114,9 @@ def load_config() -> Config:
         min_width=positive_int(values, "MIN_WIDTH", 100),
         min_height=positive_int(values, "MIN_HEIGHT", 100),
         user_agent=values.get("USER_AGENT", "apod-script/3.0"),
+        dataset_categories=expand_path(
+            values.get("DATASET_CATEGORIES", str(SCRIPT_DIR.parent / "APOD-Dataset/categories"))
+        ),
     )
 
 
@@ -319,8 +324,6 @@ def random_wallpaper(
 ) -> int:
     attempts = 0
     batch_failures = 0
-    best_candidate: Candidate | None = None
-    best_difference = float("inf")
     while attempts < config.max_attempts:
         try:
             candidate = pool.next()
@@ -334,9 +337,6 @@ def random_wallpaper(
         difference = preview_difference(candidate, monitor, config, identify)
         if difference is None:
             continue
-        if difference < best_difference:
-            best_candidate = candidate
-            best_difference = difference
         if difference > config.tolerance:
             continue
         try:
@@ -346,15 +346,32 @@ def random_wallpaper(
         if image_matches(destination, monitor, config, identify):
             return attempts
         destination.unlink(missing_ok=True)
-    if best_candidate is not None:
+    fallback_wallpaper(destination, monitor, config, identify)
+    print(f"No online match found after {attempts} attempts; used local dataset fallback")
+    return attempts
+
+
+def fallback_wallpaper(destination: Path, monitor: Monitor, config: Config, identify: list[str]) -> None:
+    category = "acceptable-landscape" if monitor.width >= monitor.height else "acceptable-portrait"
+    directory = config.dataset_categories / category
+    if not directory.is_dir():
+        raise RuntimeError(f"Dataset fallback category not found: {directory}")
+    candidates = [path for path in directory.iterdir() if path.is_file() and not path.is_symlink()]
+    random.shuffle(candidates)
+    for candidate in candidates:
         try:
-            download(best_candidate.image_url, destination, config)
-            width, height = image_dimensions(destination, identify)
-            if width >= config.min_width and height >= config.min_height:
-                return attempts
-        except (OSError, RuntimeError, subprocess.SubprocessError, urllib.error.URLError, TimeoutError):
-            destination.unlink(missing_ok=True)
-    raise RuntimeError(f"Failed to find a suitable image for {monitor.name} ({monitor.size}) after {attempts} image attempts")
+            width, height = image_dimensions(candidate, identify)
+        except (OSError, RuntimeError, subprocess.SubprocessError, ValueError):
+            continue
+        if width < config.min_width or height < config.min_height:
+            continue
+        if (width >= height) != (monitor.width >= monitor.height):
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(candidate, destination)
+        clear_quarantine(destination)
+        return
+    raise RuntimeError(f"No usable images found in dataset fallback category: {directory}")
 
 
 def daily_url(config: Config) -> str | None:
