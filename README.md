@@ -11,9 +11,9 @@ a random local image from the APOD dataset's `acceptable-landscape` or
 
 ## Current wallpapers
 
-![Wallpaper 1](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/001.jpg?v=1786710096514052000)
-![Wallpaper 2](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/002.jpg?v=1786710096514052000)
-![Wallpaper 3](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/003.jpg?v=1786710096514052000)
+![Wallpaper 1](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/001.jpg?v=1786892245859295000)
+![Wallpaper 2](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/002.jpg?v=1786892245859295000)
+![Wallpaper 3](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/003.jpg?v=1786892245859295000)
 
 ## Requirements
 
