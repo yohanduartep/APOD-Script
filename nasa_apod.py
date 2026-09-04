@@ -38,6 +38,7 @@ MAGICK_LIMITS = [
 ]
 DISPLAY_SLOTS = {
     "Built-in Retina Display": 1,
+    "Built-in Display": 1,
     "T24i-30": 2,
     "ASUS VP249": 3,
 }
