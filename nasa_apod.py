@@ -353,8 +353,7 @@ def random_wallpaper(
 
 
 def fallback_wallpaper(destination: Path, monitor: Monitor, config: Config, identify: list[str]) -> None:
-    category = "acceptable-landscape" if monitor.width >= monitor.height else "acceptable-portrait"
-    directory = config.dataset_categories / category
+    directory = config.dataset_categories / "crop-acceptable"
     if not directory.is_dir():
         raise RuntimeError(f"Dataset fallback category not found: {directory}")
     candidates = [path for path in directory.iterdir() if path.is_file() and not path.is_symlink()]
