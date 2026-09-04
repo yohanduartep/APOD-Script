@@ -6,12 +6,11 @@ the screen without cropping. Connected displays are detected at runtime, so the 
 also works with only the MacBook screen.
 
 If no suitable online image is found within the configured attempts, the script chooses
-a random local image from the APOD dataset's `acceptable-landscape` or
-`acceptable-portrait` category according to the display orientation.
+a random local image from the APOD dataset's `crop-acceptable` category, filtered to
+match the display's orientation.
 
 ## Current wallpapers
 
-![Wallpaper 1](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/001.jpg?v=1788565306648295000)
 ![Wallpaper 1](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/001.jpg?v=1788565306648295000)
 ![Wallpaper 2](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/002.jpg?v=1788565306648295000)
 ![Wallpaper 3](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/003.jpg?v=1788565306648295000)

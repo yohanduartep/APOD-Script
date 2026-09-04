@@ -564,7 +564,7 @@ def publish(wallpapers: dict[str, Path]) -> None:
     version = time.time_ns()
     images = "\n".join(
         f"![Wallpaper {slot}](https://raw.githubusercontent.com/yohanduartep/APOD-Script/refs/heads/main/{slot:03}.jpg?v={version})"
-        for _, slot in sorted(DISPLAY_SLOTS.items(), key=lambda item: item[1])
+        for slot in sorted(set(DISPLAY_SLOTS.values()))
         if f"{slot:03}.jpg" in numbered
     )
     section = f"## Current wallpapers\n\n{images}\n\n"
