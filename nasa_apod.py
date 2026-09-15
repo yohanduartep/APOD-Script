@@ -600,7 +600,7 @@ def main() -> int:
         )
         application_failures = apply_wallpapers(completed_monitors, wallpapers)
         failures += application_failures
-        active = active_wallpapers(monitors)
+        active = active_wallpapers(completed_monitors)
         for monitor, wallpaper in zip(completed_monitors, wallpapers, strict=True):
             active[monitor.name] = wallpaper
         publish(active)
