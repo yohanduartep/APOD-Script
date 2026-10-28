@@ -437,7 +437,7 @@ def apply_wallpapers(monitors: list[Monitor], wallpapers: list[Path]) -> int:
     applied_count = 0
     for index, (monitor, wallpaper) in enumerate(zip(monitors, wallpapers, strict=True), start=1):
         cached = cache / f"{run_id}-{index}{wallpaper.suffix or '.jpg'}"
-        shutil.copy2(wallpaper, cached)
+        shutil.copy(wallpaper, cached)
         clear_quarantine(cached)
         name_literal = json.dumps(monitor.name)
         path_literal = json.dumps(str(cached))
