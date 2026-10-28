@@ -539,7 +539,8 @@ def publish(wallpapers: dict[str, Path]) -> None:
     for display, wallpaper in wallpapers.items():
         slot = DISPLAY_SLOTS.get(display)
         if slot is None:
-            raise RuntimeError(f"No Git image slot configured for {display}")
+            print(f"Wallpaper not published for {display}: no Git image slot configured", file=sys.stderr)
+            continue
         image_dimensions(wallpaper, identify_command())
         destination = SCRIPT_DIR / f"{slot:03}.jpg"
         temporary = destination.with_name(f".{destination.name}.{time.time_ns()}.tmp.jpg")
