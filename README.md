@@ -21,8 +21,9 @@ match the display's orientation.
 brew install imagemagick python
 ```
 
-`nasa_apod.sh` starts the Python script used by the daily LaunchAgent. The NASA API
-key and image paths are stored in `.env`.
+`nasa_apod.sh` starts the Python script used by the daily LaunchAgent. Image
+paths are stored in `.env`. Images come from the NASA Science APOD feed, which needs no
+API key.
 
 The dataset categories default to the sibling `APOD-Dataset/categories` directory. Set
 `DATASET_CATEGORIES` in `.env` only if that directory moves elsewhere.

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import html
 import json
 import os
 import random
@@ -8,17 +9,19 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 
-API_URL = "https://api.nasa.gov/planetary/apod"
+API_URL = "https://science.nasa.gov/wp-json/wp/v2/apod-basic"
+FIRST_RANDOM_DATE = date(2000, 1, 1)
+BATCH_DAYS = 25
+PLACEHOLDER_IMAGES = {"nasa-logo@2x.png", "news-thumbnail.png"}
 SCRIPT_DIR = Path(__file__).resolve().parent
 MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 MAX_IMAGE_PIXELS = 100_000_000
@@ -46,7 +49,6 @@ DISPLAY_SLOTS = {
 
 @dataclass(frozen=True)
 class Config:
-    api_key: str
     daily_path: Path
     random_path: Path
     output_dir: Path
@@ -71,8 +73,9 @@ class Monitor:
 
 @dataclass(frozen=True)
 class Candidate:
-    preview_url: str
     image_url: str
+    width: int
+    height: int
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -100,13 +103,9 @@ def positive_int(values: dict[str, str], name: str, default: int) -> int:
 
 def load_config() -> Config:
     values = load_env(SCRIPT_DIR / ".env")
-    api_key = values.get("API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("API_KEY not set")
     daily_path = expand_path(values.get("DAILY_PATH", str(Path.home() / "Pictures/apod.jpg")))
     random_path = expand_path(values.get("RANDOM_PATH", str(Path.home() / "Pictures/randomapod.jpg")))
     return Config(
-        api_key=api_key,
         daily_path=daily_path,
         random_path=random_path,
         output_dir=expand_path(values.get("OUTPUT_DIR", str(daily_path.parent))),
@@ -253,9 +252,15 @@ def aspect_difference(
 ) -> float | None:
     try:
         width, height = image_dimensions(path, identify)
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
         return None
+    return size_difference(width, height, monitor, config)
+
+
+def size_difference(width: int, height: int, monitor: Monitor, config: Config) -> float | None:
     if width < config.min_width or height < config.min_height:
+        return None
+    if width * height > MAX_IMAGE_PIXELS:
         return None
     if (width >= height) != (monitor.width >= monitor.height):
         return None
@@ -264,35 +269,42 @@ def aspect_difference(
     return abs(image_ratio / monitor_ratio - 1) * 100
 
 
-class CandidatePool:
-    def __init__(self, config: Config):
-        self.config = config
-        self.candidates: list[Candidate] = []
-        self.index = 0
+def parse_candidate(item: object) -> Candidate | None:
+    if not isinstance(item, dict) or not isinstance(item.get("hdurl"), str):
+        return None
+    image_url = html.unescape(item["hdurl"])
+    if not valid_url(image_url):
+        return None
+    parsed = urllib.parse.urlparse(image_url)
+    if parsed.path.rsplit("/", 1)[-1] in PLACEHOLDER_IMAGES:
+        return None
+    query = urllib.parse.parse_qs(parsed.query)
+    try:
+        width, height = int(query["w"][0]), int(query["h"][0])
+    except (KeyError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return Candidate(image_url, width, height)
 
-    def load_batch(self) -> None:
-        response = request_json(self.config, {"api_key": self.config.api_key, "count": 20})
-        if not isinstance(response, list):
-            raise RuntimeError("Unexpected NASA response")
-        candidates: list[Candidate] = []
-        for item in response:
-            if not isinstance(item, dict) or item.get("media_type") != "image":
-                continue
-            preview = item.get("url")
-            image = item.get("hdurl") or preview
-            if valid_url(preview) and valid_url(image):
-                candidates.append(Candidate(preview, image))
-        if not candidates:
-            raise RuntimeError("NASA returned no images")
-        self.candidates = candidates
-        self.index = 0
 
-    def next(self) -> Candidate:
-        if self.index >= len(self.candidates):
-            self.load_batch()
-        candidate = self.candidates[self.index]
-        self.index += 1
-        return candidate
+def candidate_matches(candidate: Candidate, monitor: Monitor, config: Config) -> bool:
+    difference = size_difference(candidate.width, candidate.height, monitor, config)
+    return difference is not None and difference <= config.tolerance
+
+
+def random_candidates(config: Config) -> list[Candidate]:
+    span = (date.today() - FIRST_RANDOM_DATE).days - BATCH_DAYS
+    start = FIRST_RANDOM_DATE + timedelta(days=random.randint(0, span))
+    end = start + timedelta(days=BATCH_DAYS - 1)
+    response = request_json(
+        config,
+        {"per_page": BATCH_DAYS, "date_from": f"{start:%y%m%d}", "date_to": f"{end:%y%m%d}"},
+    )
+    if not isinstance(response, list):
+        raise RuntimeError("Unexpected NASA response")
+    candidates = [candidate for item in response if (candidate := parse_candidate(item))]
+    return sorted(candidates, key=lambda candidate: candidate.width * candidate.height, reverse=True)
 
 
 def valid_url(value: object) -> bool:
@@ -301,55 +313,30 @@ def valid_url(value: object) -> bool:
     return urllib.parse.urlparse(value).scheme in {"http", "https"}
 
 
-def preview_difference(
-    candidate: Candidate, monitor: Monitor, config: Config, identify: list[str]
-) -> float | None:
-    descriptor, name = tempfile.mkstemp(prefix="apod-preview-")
-    os.close(descriptor)
-    path = Path(name)
-    try:
-        download(candidate.preview_url, path, config)
-        return aspect_difference(path, monitor, config, identify)
-    except (OSError, RuntimeError, urllib.error.URLError, TimeoutError):
-        return None
-    finally:
-        path.unlink(missing_ok=True)
-
-
-def random_wallpaper(
-    destination: Path,
-    monitor: Monitor,
-    config: Config,
-    identify: list[str],
-    pool: CandidatePool,
-) -> int:
-    attempts = 0
+def random_wallpaper(destination: Path, monitor: Monitor, config: Config, identify: list[str]) -> int:
     batch_failures = 0
-    while attempts < config.max_attempts:
+    for attempt in range(1, config.max_attempts + 1):
         try:
-            candidate = pool.next()
-            batch_failures = 0
+            candidates = random_candidates(config)
         except RuntimeError:
             batch_failures += 1
             if batch_failures >= 5:
                 break
             continue
-        attempts += 1
-        difference = preview_difference(candidate, monitor, config, identify)
-        if difference is None:
-            continue
-        if difference > config.tolerance:
-            continue
-        try:
-            download(candidate.image_url, destination, config)
-        except (OSError, RuntimeError, urllib.error.URLError, TimeoutError):
-            continue
-        if image_matches(destination, monitor, config, identify):
-            return attempts
-        destination.unlink(missing_ok=True)
+        batch_failures = 0
+        for candidate in candidates:
+            if not candidate_matches(candidate, monitor, config):
+                continue
+            try:
+                download(candidate.image_url, destination, config)
+            except (OSError, RuntimeError, urllib.error.URLError, TimeoutError):
+                continue
+            if image_matches(destination, monitor, config, identify):
+                return attempt
+            destination.unlink(missing_ok=True)
     fallback_wallpaper(destination, monitor, config, identify)
-    print(f"No online match found after {attempts} attempts; used local dataset fallback")
-    return attempts
+    print(f"No online match found after {attempt} batches; used local dataset fallback")
+    return attempt
 
 
 def fallback_wallpaper(destination: Path, monitor: Monitor, config: Config, identify: list[str]) -> None:
@@ -374,15 +361,14 @@ def fallback_wallpaper(destination: Path, monitor: Monitor, config: Config, iden
     raise RuntimeError(f"No usable images found in dataset fallback category: {directory}")
 
 
-def daily_url(config: Config) -> str | None:
+def daily_candidate(config: Config) -> Candidate | None:
     try:
-        response = request_json(config, {"api_key": config.api_key})
+        response = request_json(config, {"per_page": 1})
     except RuntimeError:
         return None
-    if not isinstance(response, dict) or response.get("media_type") != "image":
+    if not isinstance(response, list) or not response:
         return None
-    value = response.get("hdurl") or response.get("url")
-    return value if valid_url(value) else None
+    return parse_candidate(response[0])
 
 
 def acquire_wallpapers(
@@ -393,11 +379,10 @@ def acquire_wallpapers(
     random_only: bool,
 ) -> tuple[list[Monitor], list[Path], int]:
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    pool = CandidatePool(config)
     completed_monitors: list[Monitor] = []
     wallpapers: list[Path] = []
     failures = 0
-    today = None if random_only or monitors[0].name in skipped else daily_url(config)
+    today = None if random_only or monitors[0].name in skipped else daily_candidate(config)
     for index, monitor in enumerate(monitors):
         if monitor.name in skipped:
             print(f"Skipped {monitor.name} ({monitor.size})")
@@ -406,18 +391,18 @@ def acquire_wallpapers(
             if index == 0:
                 destination = config.daily_path
                 matched = False
-                if today:
+                if today and candidate_matches(today, monitor, config):
                     try:
-                        download(today, destination, config)
+                        download(today.image_url, destination, config)
                         matched = image_matches(destination, monitor, config, identify)
                     except (OSError, RuntimeError, urllib.error.URLError, TimeoutError):
                         matched = False
                 if not matched:
                     destination = config.random_path
-                    random_wallpaper(destination, monitor, config, identify, pool)
+                    random_wallpaper(destination, monitor, config, identify)
             else:
                 destination = config.output_dir / f"apod-{index + 1}.jpg"
-                random_wallpaper(destination, monitor, config, identify, pool)
+                random_wallpaper(destination, monitor, config, identify)
             completed_monitors.append(monitor)
             wallpapers.append(destination)
             print(f"{monitor.name} ({monitor.size}): {destination}")
@@ -495,7 +480,7 @@ def git(*arguments: str, capture: bool = False) -> str:
     return result.stdout.strip() if capture else ""
 
 
-def active_wallpapers(monitors: list[Monitor]) -> dict[str, Path]:
+def displayed_wallpapers() -> list[tuple[str, Path]]:
     script = """ObjC.import('AppKit');
 var workspace = $.NSWorkspace.sharedWorkspace;
 $.NSScreen.screens.js.map(function(screen) {
@@ -503,11 +488,18 @@ $.NSScreen.screens.js.map(function(screen) {
     return screen.localizedName.js + '\\t' + (url ? url.path.js : '');
 }).join('\\n');"""
     result = run([command_path("osascript"), "-l", "JavaScript", "-e", script], timeout=15)
-    paths: dict[str, Path] = {}
+    displayed: list[tuple[str, Path]] = []
     for line in result.stdout.splitlines():
         name, separator, value = line.partition("\t")
         if separator and value:
-            paths[name] = Path(value)
+            displayed.append((name, Path(value)))
+    return displayed
+
+
+def active_wallpapers(
+    monitors: list[Monitor], displayed: list[tuple[str, Path]]
+) -> dict[str, Path]:
+    paths = dict(displayed)
     wallpapers: dict[str, Path] = {}
     for monitor in monitors:
         path = paths.get(monitor.name)
@@ -517,9 +509,9 @@ $.NSScreen.screens.js.map(function(screen) {
     return wallpapers
 
 
-def clean_cache(active: dict[str, Path]) -> None:
+def clean_cache(displayed: list[tuple[str, Path]]) -> None:
     cache = Path.home() / "Library/Caches/APOD-Script"
-    preserved = {path.resolve() for path in active.values()}
+    preserved = {path.resolve() for _, path in displayed}
     cutoff = time.time() - 7 * 24 * 60 * 60
     for path in cache.glob("*.jpg"):
         if path.resolve() not in preserved and path.stat().st_mtime < cutoff:
@@ -601,11 +593,12 @@ def main() -> int:
         )
         application_failures = apply_wallpapers(completed_monitors, wallpapers)
         failures += application_failures
-        active = active_wallpapers(completed_monitors)
+        displayed = displayed_wallpapers()
+        active = active_wallpapers(completed_monitors, displayed)
         for monitor, wallpaper in zip(completed_monitors, wallpapers, strict=True):
             active[monitor.name] = wallpaper
         publish(active)
-        clean_cache(active)
+        clean_cache(displayed)
         print(f"Done: created {len(wallpapers)} monitor-matched wallpaper(s), {failures} failed")
         return 1 if failures else 0
     except (RuntimeError, OSError, subprocess.SubprocessError, urllib.error.URLError) as error:
